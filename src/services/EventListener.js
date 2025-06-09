@@ -46,10 +46,10 @@ export class EventListener extends EventEmitter {
     // Note: 'close' event is not available on ethers WebSocketProvider
     // We'll detect disconnections through failed getBlockNumber calls
     
-    // Heartbeat to detect stale connections
+    // Heartbeat to detect stale connections (reduced from 30 seconds to 5 minutes)
     setInterval(() => {
       this.checkConnection();
-    }, 30000);
+    }, 300000);
   }
 
   async checkConnection() {
@@ -195,7 +195,7 @@ export class EventListener extends EventEmitter {
         
         // Listen for liquidation opportunities
         contract.on('AbsorbDebt', (absorber, borrower, basePaidOut, usdValue, event) => {
-          this.handleLiquidationEvent('compound', {
+          this.handleLiquidationEvent('compound-v3', {
             protocol: 'compound-v3',
             type: 'absorb-debt',
             borrower,
@@ -231,7 +231,7 @@ export class EventListener extends EventEmitter {
         this.contracts.set(`aave-${address}`, contract);
         
         contract.on('LiquidationCall', (collateralAsset, debtAsset, user, debtToCover, liquidatedCollateralAmount, liquidator, receiveAToken, event) => {
-          this.handleLiquidationEvent('aave', {
+          this.handleLiquidationEvent('aave-v3', {
             protocol: 'aave-v3',
             type: 'liquidation-call',
             borrower: user,

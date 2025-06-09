@@ -125,6 +125,29 @@ export class TransactionExecutor {
   async buildAaveV3Transaction(event, liquidationParams) {
     // Build Aave V3 liquidation transaction
     
+    // Debug log the exact values being passed to the transaction encoder
+    logger.info('🏗️ Building Aave V3 transaction with params:', {
+      borrower: event.borrower,
+      collateralAsset: liquidationParams.collateralAsset,
+      debtAsset: liquidationParams.debtAsset,
+      debtValue: liquidationParams.debtValue.toString(),
+      collateralAssetType: typeof liquidationParams.collateralAsset,
+      debtAssetType: typeof liquidationParams.debtAsset,
+      collateralAssetLength: liquidationParams.collateralAsset ? liquidationParams.collateralAsset.length : 0,
+      debtAssetLength: liquidationParams.debtAsset ? liquidationParams.debtAsset.length : 0,
+      collateralAssetValid: ethers.isAddress(liquidationParams.collateralAsset || ''),
+      debtAssetValid: ethers.isAddress(liquidationParams.debtAsset || '')
+    });
+    
+    // Validate addresses before encoding
+    if (!liquidationParams.collateralAsset || !ethers.isAddress(liquidationParams.collateralAsset)) {
+      throw new Error(`Invalid collateral asset address: "${liquidationParams.collateralAsset}"`);
+    }
+    
+    if (!liquidationParams.debtAsset || !ethers.isAddress(liquidationParams.debtAsset)) {
+      throw new Error(`Invalid debt asset address: "${liquidationParams.debtAsset}"`);
+    }
+    
     const aaveV3Interface = new ethers.Interface([
       "function liquidationCall(address collateralAsset, address debtAsset, address user, uint256 debtToCover, bool receiveAToken)"
     ]);

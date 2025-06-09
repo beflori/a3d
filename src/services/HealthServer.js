@@ -13,18 +13,19 @@ export class HealthServer {
 
   setupRoutes() {
     // Health check endpoint
-    this.app.get('/health', (req, res) => {
+    this.app.get('/health', async (req, res) => {
       try {
-        const status = this.bot.getStatus();
+        const status = await this.bot.getStatus();
         const health = {
           status: status.isRunning ? 'healthy' : 'unhealthy',
           timestamp: new Date().toISOString(),
           uptime: status.uptime,
           activeLiquidations: status.activeLiquidations,
-          walletAddress: status.walletAddress
+          walletAddress: status.walletAddress,
+          priceOracle: status.priceOracle
         };
         
-        if (status.isRunning) {
+        if (status.isRunning && status.priceOracle?.healthy) {
           res.status(200).json(health);
         } else {
           res.status(503).json(health);
@@ -64,6 +65,34 @@ export class HealthServer {
         });
       } catch (error) {
         res.status(500).json({
+          error: error.message,
+          timestamp: new Date().toISOString()
+        });
+      }
+    });
+
+    // PriceOracle health endpoint
+    this.app.get('/price-oracle', async (req, res) => {
+      try {
+        if (!this.bot.priceOracle) {
+          return res.status(503).json({
+            status: 'unavailable',
+            error: 'PriceOracle not initialized',
+            timestamp: new Date().toISOString()
+          });
+        }
+
+        const health = await this.bot.priceOracle.healthCheck();
+        const prices = await this.bot.priceOracle.getAllCachedPrices();
+        
+        res.status(health.healthy ? 200 : 503).json({
+          ...health,
+          cachedPrices: prices,
+          timestamp: new Date().toISOString()
+        });
+      } catch (error) {
+        res.status(500).json({
+          status: 'error',
           error: error.message,
           timestamp: new Date().toISOString()
         });

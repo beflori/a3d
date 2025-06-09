@@ -8,7 +8,7 @@ export class GasOracle extends EventEmitter {
     this.provider = provider;
     this.currentGasPrice = null;
     this.gasHistory = [];
-    this.updateInterval = 2000; // Update every 2 seconds
+    this.updateInterval = 120000; // Update every 2 minutes (reduced from 2 seconds)
     this.maxGasPrice = ethers.parseUnits(process.env.MAX_GAS_PRICE_GWEI || '50', 'gwei');
     this.isRunning = false;
     this.intervalId = null;

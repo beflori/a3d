@@ -40,7 +40,7 @@ export class AlchemyConfig {
     });
     
     // Configure provider options for better performance
-    provider.pollingInterval = 1000; // 1 second polling
+    provider.pollingInterval = 12000; // 12 second polling (reduced from 1 second)
     
     return { provider, wsProvider };
   }

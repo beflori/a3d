@@ -4,6 +4,7 @@ import { OpportunityValidator } from '../services/OpportunityValidator.js';
 import { TransactionExecutor } from '../services/TransactionExecutor.js';
 import { GasOracle } from '../services/GasOracle.js';
 import { MetricsCollector } from '../services/MetricsCollector.js';
+import { PriceOracle } from '../services/PriceOracle.js';
 import { AlchemyConfig } from '../utils/AlchemyConfig.js';
 import logger from '../../logger.js';
 
@@ -16,6 +17,7 @@ export class LiquidationBot {
     this.opportunityValidator = null;
     this.transactionExecutor = null;
     this.gasOracle = null;
+    this.priceOracle = null;
     this.metricsCollector = null;
     this.activeLiquidations = new Map();
   }
@@ -50,16 +52,32 @@ export class LiquidationBot {
       
       // Initialize services
       this.gasOracle = new GasOracle(this.provider);
+      this.priceOracle = new PriceOracle(this.provider);
       this.opportunityValidator = new OpportunityValidator(this.provider);
       this.transactionExecutor = new TransactionExecutor(this.wallet, this.gasOracle);
       this.eventListener = new EventListener(this.wsProvider);
       this.metricsCollector = new MetricsCollector();
+      
+      // Configure validator with wallet address for balance checking
+      this.opportunityValidator.setWalletAddress(this.wallet.address);
+      
+      // Log wallet balances for transparency and debugging
+      await this.opportunityValidator.logWalletBalances();
+      
+      // Check price oracle health
+      const priceOracleStatus = await this.opportunityValidator.getPriceOracleStatus();
+      logger.info('Price oracle status:', priceOracleStatus);
+      
+      if (!priceOracleStatus.healthy) {
+        logger.warn('Price oracle not healthy - liquidations may use fallback prices');
+      }
       
       // Setup event handlers
       this.setupEventHandlers();
       
       // Start services
       await this.gasOracle.start();
+      // Note: PriceOracle doesn't need to be started - it's stateless
       await this.eventListener.start();
       await this.metricsCollector.start();
       
@@ -237,6 +255,8 @@ export class LiquidationBot {
       await this.gasOracle.stop();
     }
     
+    // Note: PriceOracle doesn't need to be stopped - it's stateless
+    
     if (this.metricsCollector) {
       await this.metricsCollector.stop();
     }
@@ -249,12 +269,17 @@ export class LiquidationBot {
     logger.info('Liquidation bot shut down complete');
   }
 
-  getStatus() {
+  async getStatus() {
+    const priceOracleStatus = this.priceOracle ? 
+      await this.priceOracle.healthCheck() : 
+      { healthy: false, error: 'Not initialized' };
+      
     return {
       isRunning: this.isRunning,
       activeLiquidations: this.activeLiquidations.size,
       walletAddress: this.wallet?.address,
-      uptime: this.metricsCollector?.getUptime()
+      uptime: this.metricsCollector?.getUptime(),
+      priceOracle: priceOracleStatus
     };
   }
 }
