@@ -72,7 +72,7 @@ if [ -d ".git" ]; then
     git pull origin main
 else
     # Copy files from current directory
-    cp -r /home/beflori/a3d/* .
+    cp -r /home/ec2-user/a3d/* .
 fi
 
 # Install dependencies
