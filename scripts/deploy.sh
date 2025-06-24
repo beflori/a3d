@@ -87,17 +87,6 @@ else
     sudo chown $USER:$USER /var/log/liquidation-bot
 fi
 
-# Setup environment variables
-echo "⚙️ Setting up environment variables..."
-if [ ! -f "../.env" ]; then
-    cp .env.example .env
-    echo "🔧 Please edit .env file with your configuration"
-    echo "🔧 Required variables:"
-    echo "   - RPC_URL, WSS_URL, PRIVATE_KEY"
-    echo "   - AWS credentials for CloudWatch"
-    echo "   - Protocol contract addresses"
-fi
-
 # Setup PM2 ecosystem file
 echo "⚙️ Creating PM2 ecosystem file..."
 cat > ecosystem.config.js << 'EOF'
