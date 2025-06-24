@@ -1,7 +1,8 @@
 module.exports = {
   apps: [{
     name: 'liquidation-bot',
-    script: 'src/index.js',
+    script: './src/index.js',
+    cwd: '/home/ec2-user/a3d',
     instances: 1,
     exec_mode: 'fork',
     autorestart: true,
