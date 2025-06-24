@@ -89,7 +89,7 @@ fi
 
 # Setup environment variables
 echo "⚙️ Setting up environment variables..."
-if [ ! -f ".env" ]; then
+if [ ! -f "../.env" ]; then
     cp .env.example .env
     echo "🔧 Please edit .env file with your configuration"
     echo "🔧 Required variables:"
