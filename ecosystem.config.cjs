@@ -1,4 +1,4 @@
-export default {
+module.exports = {
   apps: [{
     name: 'liquidation-bot',
     script: 'src/index.js',
