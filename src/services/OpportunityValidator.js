@@ -23,9 +23,18 @@ export class OpportunityValidator {
       '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22': 'cbETH',
       '0xd9aAEc86B65D86f6A7B5B1b0c42FFA531710b6CA': 'USDbC',
       '0x50c5725949A6F0c72E6C4a641F24049A917DB0Cb': 'DAI',
-      '0xB79DD08EA68A908A97220C76d19A6aA9cBDD4376': 'USD+',
+      '0xB79DD08EA68A908A97220C76d19A6aaa9cBDD4376': 'USD+',
       '0x940181a94A35A4569E4529A3CDfB74e38FD98631': 'AERO',
       // Add more as needed
+    };
+
+    // Mapping of cToken addresses to underlying token addresses for Moonwell
+    this.cTokenToUnderlying = {
+      // Moonwell cTokens -> Underlying tokens
+      '0xEdc817A28E8B93B03976FBd4a3dDBc9f7D176c22': '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', // mUSDC -> USDC
+      '0x628ff693426583D9a7FB391E54366292F509D457': '0x4200000000000000000000000000000000000006', // mWETH -> WETH
+      '0x0dc808adcE2099A9F62AA87D9670745AbA741746': '0x2Ae3F1Ec7F1F5012CFEab0185bfc7aa3cf0DEc22', // mcbETH -> cbETH
+      '0xF877ACaAE7b5459b9B14dCd8c61cBb2A4F7E1c79': '0x60a3E35Cc302bFA44Cb288Bc5a4F316Fdb1adb42'  // mEURC -> EURC
     };
 
     // Wallet address for balance checks - will be set by LiquidationBot
@@ -47,6 +56,34 @@ export class OpportunityValidator {
     if (!address) return 'UNKNOWN';
     const symbol = this.tokenSymbols[address.toLowerCase()] || this.tokenSymbols[address];
     return symbol || `${address.slice(0, 6)}...${address.slice(-4)}`;
+  }
+
+  /**
+   * Get the underlying token address for cTokens (Moonwell, Compound, etc.)
+   * For non-cTokens, returns the original address
+   * @param {string} tokenAddress - The token address (could be cToken or underlying)
+   * @returns {string} - The underlying token address
+   */
+  getUnderlyingTokenAddress(tokenAddress) {
+    if (!tokenAddress) return tokenAddress;
+    
+    // Check if this is a known cToken
+    const underlyingAddress = this.cTokenToUnderlying[tokenAddress.toLowerCase()] || 
+                            this.cTokenToUnderlying[tokenAddress];
+    
+    // Return underlying address if found, otherwise return original address
+    return underlyingAddress || tokenAddress;
+  }
+
+  /**
+   * Check if the given address is a cToken
+   * @param {string} tokenAddress - The token address to check
+   * @returns {boolean} - True if it's a cToken, false otherwise
+   */
+  isCToken(tokenAddress) {
+    if (!tokenAddress) return false;
+    return !!(this.cTokenToUnderlying[tokenAddress.toLowerCase()] || 
+             this.cTokenToUnderlying[tokenAddress]);
   }
 
   async validate(liquidationEvent) {
@@ -133,10 +170,13 @@ export class OpportunityValidator {
             borrower: liquidationEvent.borrower,
             debtToken: balanceCheck.symbol,
             debtAsset: debtAssetAddress,
+            checkedAsset: balanceCheck.checkedAsset,
             required: debtAmount.toString(),
             available: balanceCheck.walletBalance?.toString() || 'unknown',
             reason,
-            flashLoanSuggested: this.suggestFlashLoans
+            flashLoanSuggested: this.suggestFlashLoans,
+            isCToken: balanceCheck.isCToken,
+            balanceType: balanceCheck.balanceType
           });
           
           return {
@@ -148,9 +188,12 @@ export class OpportunityValidator {
         logger.info('Wallet balance validation passed:', {
           borrower: liquidationEvent.borrower,
           debtToken: balanceCheck.symbol,
+          debtAsset: debtAssetAddress,
+          checkedAsset: balanceCheck.checkedAsset,
           required: debtAmount.toString(),
           available: balanceCheck.walletBalance.toString(),
-          balanceType: balanceCheck.balanceType
+          balanceType: balanceCheck.balanceType,
+          isCToken: balanceCheck.isCToken
         });
       } else {
         // Fallback: check if we have any of the debt tokens from position
@@ -903,8 +946,9 @@ export class OpportunityValidator {
 
   /**
    * Check if the bot's wallet has sufficient balance of the debt token to execute liquidation
-   * @param {string} debtAssetAddress - Address of the debt token
-   * @param {Big} debtAmount - Amount of debt token needed for liquidation
+   * For cTokens, this checks the underlying token balance instead of the cToken balance
+   * @param {string} debtAssetAddress - Address of the debt token (could be cToken)
+   * @param {Big} debtAmount - Amount of debt token needed for liquidation (in underlying terms)
    * @returns {Object} - { hasBalance: boolean, walletBalance: Big, required: Big, symbol: string }
    */
   async checkWalletTokenBalance(debtAssetAddress, debtAmount) {
@@ -913,26 +957,44 @@ export class OpportunityValidator {
       return { hasBalance: false, reason: 'Wallet address not configured' };
     }
 
-    // Check cache first
-    const cacheKey = `balance-${this.walletAddress}-${debtAssetAddress}`;
+    // Get the actual token address to check balance for
+    // For cTokens, we need to check the underlying token balance
+    const tokenToCheck = this.getUnderlyingTokenAddress(debtAssetAddress);
+    const isCToken = this.isCToken(debtAssetAddress);
+    
+    if (isCToken) {
+      logger.info(`Detected cToken - will check underlying token balance:`, {
+        cTokenAddress: debtAssetAddress,
+        cTokenSymbol: this.getTokenSymbol(debtAssetAddress),
+        underlyingAddress: tokenToCheck,
+        underlyingSymbol: this.getTokenSymbol(tokenToCheck),
+        requiredAmount: debtAmount.toString()
+      });
+    }
+
+    // Check cache first (use the token we're actually checking)
+    const cacheKey = `balance-${this.walletAddress}-${tokenToCheck}`;
     const cached = this.balanceCache.get(cacheKey);
     
     if (cached && Date.now() - cached.timestamp < this.balanceCacheTimeout) {
-      logger.debug(`Using cached wallet balance for ${debtAssetAddress}`);
+      logger.debug(`Using cached wallet balance for ${tokenToCheck}`);
       // Recalculate hasBalance with current debtAmount
       const hasBalance = cached.walletBalance.gte(debtAmount);
       return {
         ...cached,
         hasBalance,
-        required: debtAmount
+        required: debtAmount,
+        originalDebtAsset: debtAssetAddress,
+        checkedAsset: tokenToCheck,
+        isCToken
       };
     }
 
     try {
-      const symbol = this.getTokenSymbol(debtAssetAddress);
+      const symbol = this.getTokenSymbol(tokenToCheck);
       
       // Handle WETH special case - check both WETH and ETH balances
-      if (debtAssetAddress.toLowerCase() === '0x4200000000000000000000000000000000000006') {
+      if (tokenToCheck.toLowerCase() === '0x4200000000000000000000000000000000000006') {
         // Check ETH balance
         const ethBalance = await this.provider.getBalance(this.walletAddress);
         const ethBalanceBig = Big(ethBalance.toString()).div('1e18');
@@ -941,7 +1003,9 @@ export class OpportunityValidator {
           logger.info(`Sufficient ETH balance for liquidation:`, {
             required: debtAmount.toString(),
             available: ethBalanceBig.toString(),
-            token: 'ETH'
+            token: 'ETH',
+            originalDebtAsset: debtAssetAddress,
+            isCToken
           });
           
           const result = { 
@@ -949,7 +1013,10 @@ export class OpportunityValidator {
             walletBalance: ethBalanceBig, 
             required: debtAmount, 
             symbol: 'ETH',
-            balanceType: 'native'
+            balanceType: 'native',
+            originalDebtAsset: debtAssetAddress,
+            checkedAsset: tokenToCheck,
+            isCToken
           };
 
           // Cache ETH balance
@@ -965,7 +1032,7 @@ export class OpportunityValidator {
       }
 
       // Check ERC-20 token balance
-      const tokenContract = new ethers.Contract(debtAssetAddress, this.erc20ABI, this.provider);
+      const tokenContract = new ethers.Contract(tokenToCheck, this.erc20ABI, this.provider);
       const tokenBalance = await tokenContract.balanceOf(this.walletAddress);
       
       // Get token decimals to convert balance properly
@@ -974,7 +1041,7 @@ export class OpportunityValidator {
         decimals = await tokenContract.decimals();
       } catch (error) {
         // Use known decimals for common tokens
-        if (['USDC', 'USDbC'].includes(symbol)) {
+        if (['USDC', 'USDbC', 'EURC'].includes(symbol)) {
           decimals = 6;
         }
       }
@@ -984,11 +1051,14 @@ export class OpportunityValidator {
 
       logger.info(`Wallet token balance check:`, {
         token: symbol,
-        address: debtAssetAddress,
+        address: tokenToCheck,
+        originalDebtAsset: debtAssetAddress,
         required: debtAmount.toString(),
         available: tokenBalanceBig.toString(),
         hasBalance,
-        decimals
+        decimals,
+        isCToken,
+        balanceType: isCToken ? 'underlying-for-ctoken' : 'direct'
       });
 
       const result = { 
@@ -996,25 +1066,31 @@ export class OpportunityValidator {
         walletBalance: tokenBalanceBig, 
         required: debtAmount, 
         symbol,
-        balanceType: 'token'
+        balanceType: isCToken ? 'underlying-for-ctoken' : 'token',
+        originalDebtAsset: debtAssetAddress,
+        checkedAsset: tokenToCheck,
+        isCToken
       };
 
       // Cache the balance data (without the hasBalance which depends on debtAmount)
       this.balanceCache.set(cacheKey, {
         walletBalance: tokenBalanceBig,
         symbol,
-        balanceType: 'token',
+        balanceType: isCToken ? 'underlying-for-ctoken' : 'token',
         timestamp: Date.now()
       });
 
       return result;
 
     } catch (error) {
-      logger.error(`Error checking wallet balance for token ${debtAssetAddress}:`, error);
+      logger.error(`Error checking wallet balance for token ${tokenToCheck} (original: ${debtAssetAddress}):`, error);
       return { 
         hasBalance: false, 
         error: error.message, 
-        symbol: this.getTokenSymbol(debtAssetAddress)
+        symbol: this.getTokenSymbol(tokenToCheck),
+        originalDebtAsset: debtAssetAddress,
+        checkedAsset: tokenToCheck,
+        isCToken
       };
     }
   }
